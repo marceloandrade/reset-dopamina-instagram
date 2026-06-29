@@ -1,110 +1,144 @@
 """
-Lê o banco de dados do Notion que serve como calendário editorial
-e retorna os posts agendados para publicação (Data <= hoje, Status == Pendente).
+Integração com o Notion — ler e escrever no Calendário de Conteúdo.
+
+Usa a API pública do Notion diretamente (sem SDK), versão 2026-03-11, que
+já trabalha com "data sources" (o conceito novo que substituiu o antigo
+"database" direto nas versões anteriores a 2025-09-03).
 
 Variáveis de ambiente necessárias:
-    NOTION_TOKEN          — Integration token do Notion (secret_...)
-    NOTION_DATABASE_ID    — ID do banco de dados do calendário
-
-Estrutura esperada do banco de dados Notion:
-    Data       — Date
-    Tipo       — Select: Foto | Carrossel | Reels
-    URLs       — Rich text (URLs separadas por vírgula ou quebra de linha)
-    Legenda    — Rich text
-    Status     — Select: Pendente | Publicado | Erro
-    Media ID   — Rich text (preenchido após publicação)
-    Erro       — Rich text (preenchido em caso de falha)
+    NOTION_TOKEN            - token da integração interna do Notion
+    NOTION_DATA_SOURCE_ID   - ID do data source do Calendário de Conteúdo
 """
 
-import logging
 import os
-from datetime import date
+import datetime
+import requests
 
-from notion_client import Client
-
-logger = logging.getLogger("notion_calendario")
-
-STATUS_PENDENTE = "Pendente"
-STATUS_PUBLICADO = "Publicado"
-STATUS_ERRO = "Erro"
+NOTION_VERSION = "2026-03-11"
+NOTION_API_BASE = "https://api.notion.com/v1"
 
 
-class NotionCalendario:
+class NotionError(Exception):
+    pass
 
-    def __init__(self, token=None, database_id=None):
-        self.client = Client(auth=token or os.environ["NOTION_TOKEN"])
-        self.database_id = database_id or os.environ["NOTION_DATABASE_ID"]
 
-    def posts_para_publicar(self):
-        """Retorna todos os posts com Data <= hoje e Status == Pendente."""
-        hoje = date.today().isoformat()
-        response = self.client.databases.query(
-            database_id=self.database_id,
-            filter={
-                "and": [
-                    {"property": "Data", "date": {"on_or_before": hoje}},
-                    {"property": "Status", "select": {"equals": STATUS_PENDENTE}},
-                ]
-            },
-            sorts=[{"property": "Data", "direction": "ascending"}],
-        )
-        return [self._parse_page(p) for p in response["results"]]
+def _headers():
+    token = os.environ["NOTION_TOKEN"]
+    return {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
 
-    def marcar_publicado(self, page_id, media_id):
-        self.client.pages.update(
-            page_id=page_id,
-            properties={
-                "Status": {"select": {"name": STATUS_PUBLICADO}},
-                "Media ID": {"rich_text": [{"text": {"content": str(media_id)}}]},
-            },
-        )
-        logger.info("Notion atualizado: página %s marcada como Publicado.", page_id)
 
-    def marcar_erro(self, page_id, mensagem):
-        self.client.pages.update(
-            page_id=page_id,
-            properties={
-                "Status": {"select": {"name": STATUS_ERRO}},
-                "Erro": {"rich_text": [{"text": {"content": mensagem[:2000]}}]},
-            },
-        )
-        logger.warning("Notion atualizado: página %s marcada como Erro.", page_id)
+def _data_source_id():
+    return os.environ["NOTION_DATA_SOURCE_ID"]
 
-    # ------------------------------------------------------------------ #
-    # Helpers de parsing
-    # ------------------------------------------------------------------ #
 
-    def _parse_page(self, page):
-        props = page["properties"]
-        return {
-            "page_id": page["id"],
-            "data": self._get_date(props.get("Data")),
-            "tipo": self._get_select(props.get("Tipo")),
-            "urls": self._get_url_list(props.get("URLs")),
-            "legenda": self._get_rich_text(props.get("Legenda")),
-            "status": self._get_select(props.get("Status")),
+def _request(method, path, json_body=None):
+    url = f"{NOTION_API_BASE}/{path}"
+    resp = requests.request(method, url, headers=_headers(), json=json_body, timeout=30)
+    if resp.status_code >= 400:
+        raise NotionError(f"Notion API {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
+
+
+# ---------------------------------------------------------------------- #
+# Leitura
+# ---------------------------------------------------------------------- #
+
+def _texto_rich_text(prop):
+    """Extrai o texto puro de uma propriedade rich_text do Notion."""
+    if not prop or not prop.get("rich_text"):
+        return ""
+    return "".join(t.get("plain_text", "") for t in prop["rich_text"])
+
+
+def _pagina_para_post(pagina):
+    """Converte uma página do Notion num dicionário simples e previsível."""
+    props = pagina["properties"]
+    titulo = "".join(t.get("plain_text", "") for t in props["Título"]["title"])
+    data = (props.get("Data de publicação") or {}).get("date") or {}
+    status = (props.get("Status") or {}).get("select") or {}
+    formato = (props.get("Formato") or {}).get("select") or {}
+    paleta = (props.get("Paleta") or {}).get("select") or {}
+
+    return {
+        "page_id": pagina["id"],
+        "titulo": titulo,
+        "data": data.get("start"),
+        "status": status.get("name"),
+        "formato": formato.get("name"),
+        "paleta": paleta.get("name"),
+        "legenda": _texto_rich_text(props.get("Legenda")),
+        "urls_imagens": _texto_rich_text(props.get("URLs das imagens")),
+        "arquivos_locais": _texto_rich_text(props.get("Arquivos locais")),
+        "id_midia_publicada": _texto_rich_text(props.get("ID da mídia publicada")),
+    }
+
+
+def listar_aprovados_para_publicar(data=None):
+    """
+    Lista os posts com Status = Aprovado, com URL de imagem já preenchida,
+    e Data de publicação <= data informada (padrão: hoje). É isso que o
+    workflow agendado roda todo dia.
+    """
+    if data is None:
+        data = datetime.date.today().isoformat()
+
+    body = {
+        "filter": {
+            "and": [
+                {"property": "Status", "select": {"equals": "Aprovado"}},
+                {"property": "Data de publicação", "date": {"on_or_before": data}},
+            ]
         }
+    }
+    resultado = _request("POST", f"data_sources/{_data_source_id()}/query", body)
+    posts = [_pagina_para_post(p) for p in resultado.get("results", [])]
+    # só publica o que já tem imagem hospedada
+    return [p for p in posts if p["urls_imagens"].strip()]
 
-    def _get_date(self, prop):
-        if not prop or not prop.get("date"):
-            return None
-        return prop["date"].get("start")
 
-    def _get_select(self, prop):
-        if not prop or not prop.get("select"):
-            return None
-        return prop["select"].get("name")
+def buscar_por_arquivo(nome_arquivo):
+    """
+    Encontra a página do calendário cujo campo 'Arquivos locais' contém o
+    nome de arquivo informado (ex.: 'pub_01_2'). Usado pela rotina de
+    upload pra saber a qual post cada imagem pertence.
+    """
+    body = {
+        "filter": {
+            "property": "Arquivos locais",
+            "rich_text": {"contains": nome_arquivo},
+        }
+    }
+    resultado = _request("POST", f"data_sources/{_data_source_id()}/query", body)
+    paginas = resultado.get("results", [])
+    if not paginas:
+        return None
+    return _pagina_para_post(paginas[0])
 
-    def _get_rich_text(self, prop):
-        if not prop or not prop.get("rich_text"):
-            return ""
-        return "".join(rt["plain_text"] for rt in prop["rich_text"])
 
-    def _get_url_list(self, prop):
-        texto = self._get_rich_text(prop)
-        urls = []
-        for item in texto.replace(",", "\n").splitlines():
-            item = item.strip()
-            if item:
-                urls.append(item)
-        return urls
+# ---------------------------------------------------------------------- #
+# Escrita
+# ---------------------------------------------------------------------- #
+
+def _rich_text_prop(texto):
+    return {"rich_text": [{"type": "text", "text": {"content": texto[:2000]}}]}
+
+
+def atualizar_urls_imagens(page_id, urls_imagens):
+    """Grava a lista de URLs públicas (já prontas) no post."""
+    body = {"properties": {"URLs das imagens": _rich_text_prop(urls_imagens)}}
+    _request("PATCH", f"pages/{page_id}", body)
+
+
+def marcar_publicado(page_id, id_midia_publicada):
+    """Marca o post como Publicado e grava o ID retornado pela Graph API."""
+    body = {
+        "properties": {
+            "Status": {"select": {"name": "Publicado"}},
+            "ID da mídia publicada": _rich_text_prop(str(id_midia_publicada)),
+        }
+    }
+    _request("PATCH", f"pages/{page_id}", body)

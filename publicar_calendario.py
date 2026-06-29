@@ -1,109 +1,75 @@
+#!/usr/bin/env python3
 """
-Orquestra a publicação agendada: lê o Notion, sobe imagens se necessário
-e publica no Instagram — atualizando o status no Notion em seguida.
+Script de publicação automática — roda 1x por dia via GitHub Actions.
+
+Busca no Calendário de Conteúdo (Notion) os posts com Status = Aprovado,
+com data de publicação até hoje, e que já têm imagem(ns) hospedada(s).
+Publica cada um no Instagram e marca como Publicado.
 
 Uso:
-    python publicar_calendario.py              # publica tudo pendente até hoje
-    python publicar_calendario.py --dry-run    # lista sem publicar
-    python publicar_calendario.py --sem-upload # usa URLs do Notion diretamente
+    python publicar_calendario.py
 """
 
-import argparse
 import logging
 import sys
 
-if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-
 from dotenv import load_dotenv
+
+import notion_calendario as notion
+from instagram_api import InstagramClient, InstagramAPIError
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("publicar_calendario")
 
 
-def publicar_post(client, post, fazer_upload=True):
-    from subir_imagens import subir_lista
-    from instagram_api import InstagramAPIError
+def publicar_post(client: InstagramClient, post: dict) -> str:
+    urls = [u.strip() for u in post["urls_imagens"].splitlines() if u.strip()]
+    formato = post["formato"]
 
-    tipo = (post["tipo"] or "").lower()
-    urls = post["urls"]
-
-    if not urls:
-        raise ValueError("Post sem URLs definidas na coluna 'URLs' do Notion.")
-
-    if fazer_upload:
-        urls = subir_lista(urls)
-
-    if tipo == "foto":
+    if formato == "Foto única":
+        if len(urls) != 1:
+            raise ValueError(f"Foto única deveria ter 1 URL, tem {len(urls)}")
         return client.publicar_foto(urls[0], caption=post["legenda"])
-    elif tipo == "carrossel":
+
+    if formato == "Carrossel":
         return client.publicar_carrossel(urls, caption=post["legenda"])
-    elif tipo == "reels":
+
+    if formato == "Reels":
+        if len(urls) != 1:
+            raise ValueError(f"Reels deveria ter 1 URL de vídeo, tem {len(urls)}")
         return client.publicar_reels(urls[0], caption=post["legenda"])
-    else:
-        raise ValueError(
-            f"Tipo '{post['tipo']}' desconhecido. Use Foto, Carrossel ou Reels no Notion."
-        )
+
+    raise ValueError(f"Formato desconhecido: {formato}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Publica posts agendados do Notion no Instagram")
-    parser.add_argument("--dry-run", action="store_true", help="Lista os posts sem publicar")
-    parser.add_argument(
-        "--sem-upload",
-        action="store_true",
-        help="Usa as URLs do Notion diretamente, sem subir ao Cloudinary",
-    )
-    args = parser.parse_args()
-
-    from notion_calendario import NotionCalendario
-    from instagram_api import InstagramClient, InstagramAPIError
-
-    calendario = NotionCalendario()
-    posts = calendario.posts_para_publicar()
+    posts = notion.listar_aprovados_para_publicar()
 
     if not posts:
-        logger.info("Nenhum post pendente para publicar hoje.")
-        return
-
-    logger.info("%d post(s) encontrado(s) para publicar.", len(posts))
-
-    if args.dry_run:
-        for p in posts:
-            legenda_resumida = (p["legenda"] or "")[:60]
-            print(f"[DRY-RUN] {p['data']} | {p['tipo']} | {len(p['urls'])} URL(s) | {legenda_resumida}...")
+        print("Nenhum post aprovado e pronto pra publicar hoje.")
         return
 
     client = InstagramClient()
-    publicados = 0
-    erros = 0
+    publicados, falhas = 0, 0
 
     for post in posts:
-        page_id = post["page_id"]
-        logger.info(
-            "Publicando: %s | %s | %s",
-            post["data"],
-            post["tipo"],
-            (post["legenda"] or "")[:50],
-        )
+        titulo = post["titulo"]
         try:
-            media_id = publicar_post(client, post, fazer_upload=not args.sem_upload)
-            calendario.marcar_publicado(page_id, media_id)
-            logger.info("Publicado com sucesso. Media ID: %s", media_id)
+            logger.info("Publicando: %s (%s)", titulo, post["formato"])
+            media_id = publicar_post(client, post)
+            notion.marcar_publicado(post["page_id"], media_id)
+            logger.info("✅ Publicado: %s -> ID %s", titulo, media_id)
             publicados += 1
-        except (InstagramAPIError, ValueError, FileNotFoundError) as exc:
-            logger.error("Falha ao publicar página %s: %s", page_id, exc)
-            calendario.marcar_erro(page_id, str(exc))
-            erros += 1
+        except (InstagramAPIError, ValueError) as exc:
+            logger.error("❌ Falhou: %s -> %s", titulo, exc)
+            falhas += 1
+            # Não derruba o restante do lote — o post permanece "Aprovado"
+            # e será tentado novamente na próxima execução.
 
-    logger.info("Resultado final: %d publicado(s), %d erro(s).", publicados, erros)
-    if erros:
+    print(f"\nResumo: {publicados} publicado(s), {falhas} falha(s).")
+    if falhas:
         sys.exit(1)
 
 
