@@ -1,0 +1,45 @@
+name: Publicar posts agendados
+
+on:
+  schedule:
+    # Roda às 9h, 12h e 18h (horário de Brasília = UTC-3)
+    - cron: "0 12,15,21 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Listar sem publicar (dry-run)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Publicar posts pendentes
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python publicar_calendario.py --dry-run
+          else
+            python publicar_calendario.py
+          fi
