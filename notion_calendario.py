@@ -100,6 +100,29 @@ def listar_aprovados_para_publicar(data=None):
     return [p for p in posts if p["urls_imagens"].strip()]
 
 
+def listar_proximos_dias(dias: int = 15) -> list:
+    """
+    Lista TODOS os posts (qualquer status) com data de publicação entre hoje
+    e hoje + `dias`. Usado pela rotina de revisão quinzenal — diferente de
+    listar_aprovados_para_publicar(), aqui queremos ver rascunhos também,
+    pra saber o que ainda falta aprovar.
+    """
+    hoje = datetime.date.today()
+    limite = (hoje + datetime.timedelta(days=dias)).isoformat()
+
+    body = {
+        "filter": {
+            "and": [
+                {"property": "Data de publicação", "date": {"on_or_after": hoje.isoformat()}},
+                {"property": "Data de publicação", "date": {"on_or_before": limite}},
+            ]
+        },
+        "sorts": [{"property": "Data de publicação", "direction": "ascending"}],
+    }
+    resultado = _request("POST", f"data_sources/{_data_source_id()}/query", body)
+    return [_pagina_para_post(p) for p in resultado.get("results", [])]
+
+
 def buscar_por_arquivo(nome_arquivo):
     """
     Encontra a página do calendário cujo campo 'Arquivos locais' contém o

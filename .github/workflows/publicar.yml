@@ -2,8 +2,9 @@ name: Publicar calendário no Instagram
 
 on:
   schedule:
-    # 12:00 UTC = 09:00 horário de Brasília (UTC-3)
-    - cron: "0 12 * * *"
+    # 15:00 UTC = 12:00 horário de Brasília (UTC-3) — horário de almoço,
+    # intencional: é quando o público tende a estar com o celular na mão.
+    - cron: "0 15 * * *"
   workflow_dispatch: {} # permite rodar manualmente pelo botão "Run workflow" no GitHub, útil pra testar
 
 jobs:
@@ -11,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Baixar o repositório
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
