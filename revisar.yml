@@ -1,0 +1,30 @@
+name: Revisar calendário (a cada 15 dias)
+
+on:
+  schedule:
+    # Dias 1 e 16 de cada mês, às 12:00 UTC (09h Brasília)
+    - cron: "0 12 1,16 * *"
+  workflow_dispatch: {} # permite rodar manualmente pelo botão "Run workflow", útil pra testar
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositório
+        uses: actions/checkout@v5
+
+      - name: Configurar Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Revisar calendário e avisar por WhatsApp
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+          WHATSAPP_APIKEY: ${{ secrets.WHATSAPP_APIKEY }}
+        run: python revisar_calendario.py

@@ -13,6 +13,7 @@ Exemplos:
     python cli.py reels --video-url "https://.../video.mp4" --caption "Legenda"
     python cli.py apagar --media-id 18108923192475148
     python cli.py listar --limite 5
+    python cli.py insights --dias 7 --posts
     python cli.py renovar-token
 """
 
@@ -29,6 +30,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from dotenv import load_dotenv
 
 from instagram_api import InstagramClient, InstagramAPIError
+import insights as insights_mod
 
 load_dotenv()
 
@@ -85,6 +87,14 @@ def cmd_listar(args, client):
     print(json.dumps(midias, indent=2, ensure_ascii=False))
 
 
+def cmd_insights(args, client):
+    resumo = insights_mod.resumo_conta(client, dias=args.dias)
+    print(json.dumps(resumo, indent=2, ensure_ascii=False))
+    if args.posts:
+        posts = insights_mod.posts_recentes_com_insights(client, dias=args.dias)
+        print(json.dumps(posts, indent=2, ensure_ascii=False))
+
+
 def cmd_renovar_token(args, client):
     novo_token = client.renovar_token_longa_duracao()
     print("✅ Token renovado com sucesso.")
@@ -117,6 +127,10 @@ def main():
     p_listar = sub.add_parser("listar", help="Lista as últimas mídias publicadas")
     p_listar.add_argument("--limite", type=int, default=10)
 
+    p_insights = sub.add_parser("insights", help="Mostra métricas de crescimento da conta e dos posts recentes")
+    p_insights.add_argument("--dias", type=int, default=7, help="Janela em dias (padrão: 7)")
+    p_insights.add_argument("--posts", action="store_true", help="Inclui métricas dos posts publicados no período")
+
     sub.add_parser("renovar-token", help="Troca o token atual por um novo de 60 dias")
 
     args = parser.parse_args()
@@ -129,6 +143,7 @@ def main():
         "reels": cmd_reels,
         "apagar": cmd_apagar,
         "listar": cmd_listar,
+        "insights": cmd_insights,
         "renovar-token": cmd_renovar_token,
     }
 

@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "PowerShell(Get-Content *)",
-      "PowerShell(Get-ChildItem *)"
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(cd \"C:\\\\Users\\\\marce\\\\.claude\\\\skills\\\\instagram-publish\"; $env:PYTHONIOENCODING=\"utf-8\"; venv\\\\Scripts\\\\python.exe subir_imagens.py)",
+      "PowerShell(cd \"C:\\\\Users\\\\marce\\\\.claude\\\\skills\\\\instagram-publish\"; $env:PYTHONIOENCODING=\"utf-8\"; venv\\\\Scripts\\\\python.exe publicar_calendario.py)",
+      "PowerShell(cd \"C:\\\\Users\\\\marce\\\\.claude\\\\skills\\\\instagram-publish\"; $env:PYTHONIOENCODING=\"utf-8\"; venv\\\\Scripts\\\\python.exe cli.py status)",
+      "PowerShell(cd \"C:\\\\Users\\\\marce\\\\.claude\\\\skills\\\\instagram-publish\"; $env:PYTHONIOENCODING=\"utf-8\"; venv\\\\Scripts\\\\python.exe revisar_calendario.py)"
     ]
   }
 }

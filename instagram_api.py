@@ -195,6 +195,40 @@ class InstagramClient:
         return result.get("data", [])
 
     # ------------------------------------------------------------------ #
+    # Insights (métricas de crescimento)
+    # ------------------------------------------------------------------ #
+    #
+    # Propositalmente "burros": só repassam a métrica pedida pra Graph API
+    # e devolvem a resposta crua. A Meta muda nomes/disponibilidade de
+    # métrica com frequência (ex.: "impressions" foi descontinuada em
+    # abr/2025 e virou "views") — decidir QUAIS métricas pedir e como
+    # reagir se uma falhar é responsabilidade de quem chama (insights.py),
+    # não deste núcleo. Assim, quando a Meta mudar de novo, só um lugar
+    # precisa mudar.
+
+    def insights_conta(self, metricas, period="day", since=None, until=None, metric_type=None):
+        """
+        Métricas de nível de conta (ex.: reach). `metricas` pode ser lista
+        ou string separada por vírgula. `since`/`until` são timestamps Unix.
+        """
+        if isinstance(metricas, (list, tuple)):
+            metricas = ",".join(metricas)
+        params = {"metric": metricas, "period": period}
+        if since is not None:
+            params["since"] = since
+        if until is not None:
+            params["until"] = until
+        if metric_type is not None:
+            params["metric_type"] = metric_type
+        return self._request("GET", f"{self.ig_user_id}/insights", params)
+
+    def insights_midia(self, media_id, metricas):
+        """Métricas de uma mídia específica (ex.: reach, likes, comments, saved, shares, views)."""
+        if isinstance(metricas, (list, tuple)):
+            metricas = ",".join(metricas)
+        return self._request("GET", f"{media_id}/insights", {"metric": metricas})
+
+    # ------------------------------------------------------------------ #
     # Token
     # ------------------------------------------------------------------ #
 
