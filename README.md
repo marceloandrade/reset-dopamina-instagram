@@ -8,6 +8,7 @@ Feito pra ser **replicável**: para usar com outra conta, basta um novo `.env` �
 - Publica foto única, carrossel (2 a 10 imagens) e Reels
 - Apaga mídias (com confirmação obrigatória)
 - Lista as últimas publicações
+- Consulta métricas de crescimento — seguidores, alcance e engajamento por post (insights)
 - Renova o token de acesso (60 dias) quando precisar
 
 Pré-requisito: a conta do Instagram já precisa estar configurada como Business/Creator,
@@ -55,6 +56,9 @@ python cli.py reels --video-url "https://exemplo.com/video.mp4" --caption "Legen
 # Listar as últimas publicações
 python cli.py listar --limite 5
 
+# Ver métricas de crescimento (últimos 7 dias, com performance dos posts)
+python cli.py insights --dias 7 --posts
+
 # Apagar uma mídia (precisa confirmar explicitamente)
 python cli.py apagar --media-id 18108923192475148 --confirmar
 
@@ -77,6 +81,47 @@ A Graph API busca o arquivo a partir de uma URL — ela não aceita upload diret
 arquivo do seu computador. A imagem/vídeo precisa estar hospedado em algum lugar acessível
 pela internet no momento da publicação (no projeto completo, isso vai ser resolvido pelo
 próprio repositório no GitHub — Etapa 4).
+
+## Métricas de crescimento (insights)
+
+Além de publicar, o kit também lê métricas direto da Graph API — sem precisar
+abrir o app do Instagram:
+
+- **Nível de conta:** seguidores atuais e alcance (`reach`) somado nos últimos N dias
+- **Nível de post:** alcance, visualizações, curtidas, comentários, salvamentos e
+  compartilhamentos de cada mídia publicada no período
+
+```bash
+python cli.py insights --dias 7 --posts
+```
+
+Isso é o que alimenta o `relatorio_semanal.py`: todo domingo/segunda o
+GitHub Actions (`.github/workflows/relatorio_semanal.yml`) roda esse script sozinho,
+manda um resumo por WhatsApp (via `whatsapp_notify.py`) e guarda o histórico de
+seguidores em `dados/historico_insights.json`, **dentro do próprio repositório** —
+é assim que ele sabe comparar "quanto cresceu desde a semana passada" mesmo rodando
+num runner novo a cada execução, sem precisar de banco de dados.
+
+### ⚠️ Permissão extra necessária
+
+Insights exige a permissão **`instagram_manage_insights`** no token — as permissões
+de publicação (`instagram_basic`, `instagram_content_publish`) não são suficientes.
+Essa permissão não aparece em "Adicionar casos de uso" nem no caso de uso de Páginas:
+ela mora dentro do caso de uso **"Gerenciar mensagens e conteúdo no Instagram"**, aba
+**Permissões e recursos**, em ordem alfabética. Se `cli.py insights` retornar erro
+`(#10) Application does not have permission for this action`, é isso — veja o item 6
+do catálogo de erros no Notion pro passo a passo completo.
+
+Depois de adicionar a permissão lá, gere um token novo no Graph API Explorer e rode
+`python cli.py renovar-token` normalmente (mesmo fluxo de sempre).
+
+### Métricas usadas (e por que não `impressions`)
+
+A Meta descontinuou `impressions` e `profile_views` (série temporal) em abril/2025,
+substituindo por `views`. O módulo `insights.py` já usa o conjunto atual (`reach`,
+`views`, `likes`, `comments`, `saved`, `shares`) e cai automaticamente para um
+conjunto reduzido se a API rejeitar alguma métrica — a Graph API muda esse conjunto
+de tempos em tempos, então isso é tratado como algo esperado, não uma exceção.
 
 ## Limitações conhecidas da API
 
