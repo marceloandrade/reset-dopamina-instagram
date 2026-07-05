@@ -140,6 +140,7 @@ class InstagramClient:
             "caption": caption,
         })
         creation_id = container["id"]
+        self._esperar_processamento(creation_id, timeout=60, intervalo=3)
         result = self._request("POST", f"{self.ig_user_id}/media_publish", {
             "creation_id": creation_id,
         })
